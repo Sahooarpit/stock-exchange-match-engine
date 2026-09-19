@@ -19,7 +19,7 @@ import static java.lang.Math.min;
 @org.springframework.core.annotation.Order(2)
 public class MatchEngine implements CommandLineRunner {
 
-    private final Map<String, OrderBook> orderBooks = new ConcurrentHashMap<>(); // Key is now String
+    private final Map<String, OrderBook> orderBooks = new ConcurrentHashMap<>();
 
     private final OrderRepository orderRepository;
     private final TradeRepository tradeRepository;
@@ -29,7 +29,6 @@ public class MatchEngine implements CommandLineRunner {
     @Override
     public void run(String... args) throws Exception {
         System.out.println("Loading order books from database...");
-        // Initialize order books for all known instruments
         instrumentRepository.findAll().forEach(instrument -> {
             orderBooks.put(instrument.getTicker(), new OrderBook(instrument.getTicker()));
         });
@@ -39,7 +38,7 @@ public class MatchEngine implements CommandLineRunner {
 
         for (Order order : openOrders) {
             OrderBook book = orderBooks.get(order.getTicker());
-            if (book != null) { // Only add orders for known instruments
+            if (book != null) {
                 if (order.getSide() == Side.BUY) {
                     book.getBids().computeIfAbsent(order.getPrice(), p -> new ArrayDeque<>()).add(order);
                 } else {
@@ -52,7 +51,7 @@ public class MatchEngine implements CommandLineRunner {
 
     @Transactional
     public List<Trade> processOrder(Order newOrder) {
-        clientService.validateOrder(newOrder);
+        clientService.lockFundsAndValidateOrder(newOrder);
 
         OrderBook book = orderBooks.computeIfAbsent(newOrder.getTicker(), OrderBook::new);
 
@@ -86,6 +85,7 @@ public class MatchEngine implements CommandLineRunner {
 
                 Trade trade = new Trade(buyOrder.getOrderId(), sellOrder.getOrderId(), buyOrder.getClient(), sellOrder.getClient(), buyOrder.getTicker(), matchQuantity, sellOrder.getPrice());
                 executedTrades.add(trade);
+                clientService.executeTrade(trade, buyOrder, sellOrder);
 
                 buyOrder.setRemainingQuantity(buyOrder.getRemainingQuantity() - matchQuantity);
                 sellOrder.setRemainingQuantity(sellOrder.getRemainingQuantity() - matchQuantity);
@@ -110,6 +110,7 @@ public class MatchEngine implements CommandLineRunner {
 
                 Trade trade = new Trade(buyOrder.getOrderId(), sellOrder.getOrderId(), buyOrder.getClient(), sellOrder.getClient(), sellOrder.getTicker(), matchQuantity, buyOrder.getPrice());
                 executedTrades.add(trade);
+                clientService.executeTrade(trade, buyOrder, sellOrder);
 
                 sellOrder.setRemainingQuantity(sellOrder.getRemainingQuantity() - matchQuantity);
                 buyOrder.setRemainingQuantity(buyOrder.getRemainingQuantity() - matchQuantity);
@@ -145,12 +146,40 @@ public class MatchEngine implements CommandLineRunner {
         orderRepository.saveAll(allModifiedOrders);
         if (!executedTrades.isEmpty()) {
             tradeRepository.saveAll(executedTrades);
-            for (Trade trade : executedTrades) {
-                clientService.updateHolding(trade.getSellClient().getClientId(), trade.getTicker(), BigDecimal.valueOf(trade.getQuantity()).negate());
-                clientService.updateHolding(trade.getSellClient().getClientId(), "USDT", trade.getPrice().multiply(BigDecimal.valueOf(trade.getQuantity())));
-                clientService.updateHolding(trade.getBuyClient().getClientId(), trade.getTicker(), BigDecimal.valueOf(trade.getQuantity()));
-                clientService.updateHolding(trade.getBuyClient().getClientId(), "USDT", trade.getPrice().multiply(BigDecimal.valueOf(trade.getQuantity())).negate());
+        }
+    }
+    
+    @Transactional
+    public void cancelOrder(String orderId, String username) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new IllegalStateException("Order not found: " + orderId));
+                
+        if (!order.getClient().getUsername().equals(username)) {
+            throw new IllegalStateException("Not authorized to cancel this order");
+        }
+        
+        if (order.getStatus() == OrderStatus.FILLED || order.getStatus() == OrderStatus.CANCELLED) {
+            throw new IllegalStateException("Order cannot be cancelled. Current status: " + order.getStatus());
+        }
+
+        // Remove from memory
+        OrderBook book = orderBooks.get(order.getTicker());
+        if (book != null) {
+            Map<BigDecimal, Deque<Order>> sideBook = (order.getSide() == Side.BUY) ? book.getBids() : book.getAsks();
+            Deque<Order> priceLevel = sideBook.get(order.getPrice());
+            if (priceLevel != null) {
+                priceLevel.removeIf(o -> o.getOrderId().equals(orderId));
+                if (priceLevel.isEmpty()) {
+                    sideBook.remove(order.getPrice());
+                }
             }
         }
+
+        // Unlock funds
+        clientService.unlockFunds(order);
+        
+        // Update DB
+        order.setStatus(OrderStatus.CANCELLED);
+        orderRepository.save(order);
     }
 }

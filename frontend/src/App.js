@@ -4,10 +4,21 @@ import Login from './components/Login';
 import Register from './components/Register';
 import Dashboard from './components/Dashboard';
 import Transactions from './components/Transactions';
+import AdminDashboard from './components/AdminDashboard';
 import AuthService from './services/AuthService';
 
 function App() {
     const [isAuthenticated, setIsAuthenticated] = useState(AuthService.isAuthenticated());
+    const [isAdmin, setIsAdmin] = useState(false);
+
+    useEffect(() => {
+        const user = AuthService.getCurrentUser();
+        if (user && user.roles && user.roles.includes('ROLE_ADMIN')) {
+            setIsAdmin(true);
+        } else {
+            setIsAdmin(false);
+        }
+    }, [isAuthenticated]);
 
     const handleLogin = () => {
         setIsAuthenticated(true);
@@ -16,6 +27,7 @@ function App() {
     const handleLogout = () => {
         AuthService.logout();
         setIsAuthenticated(false);
+        setIsAdmin(false);
     };
 
     return (
@@ -28,14 +40,20 @@ function App() {
                             <ul className="navbar-nav ms-auto mb-2 mb-lg-0">
                                 {isAuthenticated ? (
                                     <>
-                                        <li className="nav-item">
-                                            <Link className="nav-link" to="/dashboard">Dashboard</Link>
-                                        </li>
+                                        {isAdmin ? (
+                                            <li className="nav-item">
+                                                <Link className="nav-link" to="/admin-dashboard">Admin Dashboard</Link>
+                                            </li>
+                                        ) : (
+                                            <li className="nav-item">
+                                                <Link className="nav-link" to="/dashboard">Dashboard</Link>
+                                            </li>
+                                        )}
                                         <li className="nav-item">
                                             <Link className="nav-link" to="/transactions">Transactions</Link>
                                         </li>
                                         <li className="nav-item">
-                                            <button className="btn btn-outline-light" onClick={handleLogout}>Logout</button>
+                                            <button className="btn btn-outline-light ms-2" onClick={handleLogout}>Logout</button>
                                         </li>
                                     </>
                                 ) : (
@@ -57,9 +75,10 @@ function App() {
                     <Routes>
                         <Route path="/login" element={<Login onLogin={handleLogin} />} />
                         <Route path="/register" element={<Register />} />
-                        <Route path="/dashboard" element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />} />
+                        <Route path="/dashboard" element={isAuthenticated && !isAdmin ? <Dashboard /> : <Navigate to={isAdmin ? "/admin-dashboard" : "/login"} />} />
+                        <Route path="/admin-dashboard" element={isAuthenticated && isAdmin ? <AdminDashboard /> : <Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
                         <Route path="/transactions" element={isAuthenticated ? <Transactions /> : <Navigate to="/login" />} />
-                        <Route path="/" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} />} />
+                        <Route path="/" element={<Navigate to={isAuthenticated ? (isAdmin ? "/admin-dashboard" : "/dashboard") : "/login"} />} />
                     </Routes>
                 </div>
             </div>

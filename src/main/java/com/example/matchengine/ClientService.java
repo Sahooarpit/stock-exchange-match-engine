@@ -38,7 +38,8 @@ public class ClientService {
         return clientRepository.findAll();
     }
 
-    public void validateOrder(Order order) {
+    @Transactional
+    public void lockFundsAndValidateOrder(Order order) {
         Client client = order.getClient();
 
         instrumentRepository.findById(order.getTicker())
@@ -46,38 +47,95 @@ public class ClientService {
 
         if (order.getSide() == Side.BUY) {
             BigDecimal requiredCash = order.getPrice().multiply(BigDecimal.valueOf(order.getOriginalQuantity()));
-            PortfolioHolding cashHolding = portfolioHoldingRepository.findByClientClientIdAndTicker(client.getClientId(), "USDT")
-                    .orElse(new PortfolioHolding(client, "USDT", BigDecimal.ZERO));
+            PortfolioHolding cashHolding = getOrCreateHolding(client.getClientId(), "USDT");
 
             if (cashHolding.getQuantity().compareTo(requiredCash) < 0) {
-                throw new IllegalStateException("Insufficient funds for client " + client.getClientId() + ". Required: " + requiredCash + ", Available: " + cashHolding.getQuantity());
+                throw new IllegalStateException("Insufficient funds. Required: " + requiredCash + ", Available: " + cashHolding.getQuantity());
             }
-        } else { // SELL order
-            PortfolioHolding stockHolding = portfolioHoldingRepository.findByClientClientIdAndTicker(client.getClientId(), order.getTicker())
-                    .orElse(new PortfolioHolding(client, order.getTicker(), BigDecimal.ZERO));
 
-            if (stockHolding.getQuantity().compareTo(BigDecimal.valueOf(order.getOriginalQuantity())) < 0) {
-                throw new IllegalStateException("Insufficient stock for client " + client.getClientId() + ". Required: " + order.getOriginalQuantity() + ", Available: " + stockHolding.getQuantity());
+            cashHolding.setQuantity(cashHolding.getQuantity().subtract(requiredCash));
+            cashHolding.setLockedQuantity(cashHolding.getLockedQuantity().add(requiredCash));
+            portfolioHoldingRepository.save(cashHolding);
+
+        } else { // SELL order
+            PortfolioHolding stockHolding = getOrCreateHolding(client.getClientId(), order.getTicker());
+            BigDecimal requiredStock = BigDecimal.valueOf(order.getOriginalQuantity());
+
+            if (stockHolding.getQuantity().compareTo(requiredStock) < 0) {
+                throw new IllegalStateException("Insufficient stock. Required: " + requiredStock + ", Available: " + stockHolding.getQuantity());
             }
+
+            stockHolding.setQuantity(stockHolding.getQuantity().subtract(requiredStock));
+            stockHolding.setLockedQuantity(stockHolding.getLockedQuantity().add(requiredStock));
+            portfolioHoldingRepository.save(stockHolding);
         }
     }
 
     @Transactional
-    public void updateHolding(String clientId, String ticker, BigDecimal quantityChange) {
-        Client client = clientRepository.findById(clientId)
-                .orElseThrow(() -> new IllegalStateException("Client not found with ID: " + clientId));
+    public void executeTrade(Trade trade, Order buyOrder, Order sellOrder) {
+        BigDecimal tradeQty = BigDecimal.valueOf(trade.getQuantity());
+        BigDecimal tradePrice = trade.getPrice();
+        BigDecimal tradeValue = tradeQty.multiply(tradePrice);
 
-        instrumentRepository.findById(ticker)
-                .orElseThrow(() -> new IllegalStateException("Invalid ticker: " + ticker));
-
-        PortfolioHolding holding = portfolioHoldingRepository.findByClientClientIdAndTicker(clientId, ticker)
-                .orElse(new PortfolioHolding(client, ticker, BigDecimal.ZERO));
-
-        BigDecimal newQuantity = holding.getQuantity().add(quantityChange);
-        if (newQuantity.compareTo(BigDecimal.ZERO) < 0) {
-            throw new IllegalStateException("Attempted to create negative holding for client " + clientId + " for ticker " + ticker);
+        // 1. Process Buyer
+        PortfolioHolding buyerUsdt = getOrCreateHolding(buyOrder.getClient().getClientId(), "USDT");
+        PortfolioHolding buyerTicker = getOrCreateHolding(buyOrder.getClient().getClientId(), trade.getTicker());
+        
+        // Deduct from buyer's locked USDT at the original limit price they locked it at
+        BigDecimal lockedValueToDeduct = tradeQty.multiply(buyOrder.getPrice());
+        buyerUsdt.setLockedQuantity(buyerUsdt.getLockedQuantity().subtract(lockedValueToDeduct));
+        
+        // Refund the difference if the trade executed at a better (lower) price than the limit order
+        BigDecimal refundAmount = lockedValueToDeduct.subtract(tradeValue);
+        if (refundAmount.compareTo(BigDecimal.ZERO) > 0) {
+            buyerUsdt.setQuantity(buyerUsdt.getQuantity().add(refundAmount));
         }
-        holding.setQuantity(newQuantity);
-        portfolioHoldingRepository.save(holding);
+        
+        // Buyer gains the ticker quantity
+        buyerTicker.setQuantity(buyerTicker.getQuantity().add(tradeQty));
+        portfolioHoldingRepository.save(buyerUsdt);
+        portfolioHoldingRepository.save(buyerTicker);
+
+        // 2. Process Seller
+        PortfolioHolding sellerTicker = getOrCreateHolding(sellOrder.getClient().getClientId(), trade.getTicker());
+        PortfolioHolding sellerUsdt = getOrCreateHolding(sellOrder.getClient().getClientId(), "USDT");
+
+        // Deduct from seller's locked Ticker
+        sellerTicker.setLockedQuantity(sellerTicker.getLockedQuantity().subtract(tradeQty));
+
+        // Seller gains the USDT trade value
+        sellerUsdt.setQuantity(sellerUsdt.getQuantity().add(tradeValue));
+        portfolioHoldingRepository.save(sellerTicker);
+        portfolioHoldingRepository.save(sellerUsdt);
     }
+    
+    @Transactional
+    public void unlockFunds(Order order) {
+        if (order.getSide() == Side.BUY) {
+            BigDecimal lockedAmount = order.getPrice().multiply(BigDecimal.valueOf(order.getRemainingQuantity()));
+            PortfolioHolding cashHolding = getOrCreateHolding(order.getClient().getClientId(), "USDT");
+            
+            cashHolding.setLockedQuantity(cashHolding.getLockedQuantity().subtract(lockedAmount));
+            cashHolding.setQuantity(cashHolding.getQuantity().add(lockedAmount));
+            portfolioHoldingRepository.save(cashHolding);
+        } else {
+            BigDecimal lockedStock = BigDecimal.valueOf(order.getRemainingQuantity());
+            PortfolioHolding stockHolding = getOrCreateHolding(order.getClient().getClientId(), order.getTicker());
+            
+            stockHolding.setLockedQuantity(stockHolding.getLockedQuantity().subtract(lockedStock));
+            stockHolding.setQuantity(stockHolding.getQuantity().add(lockedStock));
+            portfolioHoldingRepository.save(stockHolding);
+        }
+    }
+
+    private PortfolioHolding getOrCreateHolding(String clientId, String ticker) {
+        return portfolioHoldingRepository.findByClientClientIdAndTicker(clientId, ticker)
+                .orElseGet(() -> {
+                    Client client = clientRepository.findById(clientId).orElseThrow(() -> new IllegalStateException("Client not found: " + clientId));
+                    PortfolioHolding holding = new PortfolioHolding(client, ticker, BigDecimal.ZERO);
+                    holding.setLockedQuantity(BigDecimal.ZERO);
+                    return holding;
+                });
+    }
+
 }

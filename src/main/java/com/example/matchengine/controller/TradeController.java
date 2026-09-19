@@ -13,6 +13,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
@@ -41,5 +42,12 @@ public class TradeController {
         List<Trade> trades = matchEngine.processOrder(order);
         String responseMessage = "Order processed. " + trades.size() + " trade(s) executed.";
         return ResponseEntity.ok(responseMessage);
+    }
+    
+    @PostMapping("/trade/cancel")
+    public ResponseEntity<String> cancelOrder(@RequestParam String orderId) {
+        String username = ((User) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getUsername();
+        matchEngine.cancelOrder(orderId, username);
+        return ResponseEntity.ok("Order cancelled successfully");
     }
 }

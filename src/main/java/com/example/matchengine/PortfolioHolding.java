@@ -27,6 +27,9 @@ public class PortfolioHolding {
     @Column(nullable = false, precision = 19, scale = 8)
     private BigDecimal quantity;
 
+    @Column(nullable = false, precision = 19, scale = 8)
+    private BigDecimal lockedQuantity = BigDecimal.ZERO;
+
     public PortfolioHolding(Client client, String ticker, BigDecimal quantity) {
         this.client = client;
         this.ticker = ticker;

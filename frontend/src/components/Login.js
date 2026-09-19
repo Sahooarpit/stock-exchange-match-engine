@@ -12,9 +12,13 @@ const Login = ({ onLogin }) => {
         e.preventDefault();
         setMessage('');
         AuthService.login(username, password).then(
-            () => {
+            (data) => {
                 onLogin();
-                navigate('/dashboard');
+                if (data.roles && data.roles.includes('ROLE_ADMIN')) {
+                    navigate('/admin-dashboard');
+                } else {
+                    navigate('/dashboard');
+                }
             },
             (error) => {
                 const resMessage =

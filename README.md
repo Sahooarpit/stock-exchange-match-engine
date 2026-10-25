@@ -131,6 +131,10 @@ The entire application stack is containerized using **Docker and Docker Compose*
   - **Problem:** The project was initially developed with an API-first approach, which led to some business logic residing directly in the controllers. This made the controllers bloated and tightly coupled to the data layer.
   - **Solution:** I undertook a significant refactoring effort to move all business logic into a dedicated **service layer**. This involved creating new service classes (`ClientService`, `PortfolioService`, `InstrumentService`) and updating the controllers to delegate all logic to these services. This resulted in leaner controllers, better separation of concerns, and a more maintainable and testable codebase.
 
+- **Challenge: Preventing Balance Overdrafts and Duplicate Orders.**
+  - **Problem:** Users could originally submit multiple limit orders using the same balance, potentially overdrawing their accounts if all orders matched. Furthermore, network retries could result in duplicate orders being created.
+  - **Solution:** I implemented a robust **Escrow/Locking system** where funds are deducted from a user's `Available` balance and moved to a `Locked` balance the moment an order is created. When the order executes or is cancelled, the locked funds are consumed or refunded accordingly. Additionally, I implemented **Idempotency keys** by generating a unique UUID on the React frontend for each trade request. The backend uses this UUID as the primary key for the order, rejecting duplicate submissions with the same key to prevent accidental double-ordering.
+
 - **Challenge: Concurrency in the Matching Engine.**
   - **Problem:** The engine needed to handle simultaneous orders without causing race conditions.
   - **Solution:** I chose `ConcurrentHashMap` and `Deque` to create a thread-safe order book structure, allowing for high-throughput, non-blocking reads and safe, concurrent writes.

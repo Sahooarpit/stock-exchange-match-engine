@@ -37,6 +37,29 @@ public class ClientService {
     public List<Client> findAllClients() {
         return clientRepository.findAll();
     }
+    
+    @Transactional
+    public void updateHolding(String clientId, String ticker, BigDecimal quantityChange) {
+        Client client = clientRepository.findById(clientId)
+                .orElseThrow(() -> new IllegalStateException("Client not found with ID: " + clientId));
+
+        instrumentRepository.findById(ticker)
+                .orElseThrow(() -> new IllegalStateException("Invalid ticker: " + ticker));
+
+        PortfolioHolding holding = portfolioHoldingRepository.findByClientClientIdAndTicker(clientId, ticker)
+                .orElse(new PortfolioHolding(client, ticker, BigDecimal.ZERO));
+        
+        if (holding.getLockedQuantity() == null) {
+            holding.setLockedQuantity(BigDecimal.ZERO);
+        }
+
+        BigDecimal newQuantity = holding.getQuantity().add(quantityChange);
+        if (newQuantity.compareTo(BigDecimal.ZERO) < 0) {
+            throw new IllegalStateException("Attempted to create negative holding for client " + clientId + " for ticker " + ticker);
+        }
+        holding.setQuantity(newQuantity);
+        portfolioHoldingRepository.save(holding);
+    }
 
     @Transactional
     public void lockFundsAndValidateOrder(Order order) {

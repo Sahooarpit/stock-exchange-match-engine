@@ -1,16 +1,17 @@
 import axios from 'axios';
 import AuthService from './AuthService';
 
-const API_URL = 'http://localhost:8080/api/trade';
+const API_URL = 'http://localhost:8080/trade';
 
 class TradeService {
-    submitOrder(ticker, side, quantity, price) {
+    submitOrder(orderId, ticker, side, quantity, price) {
         const user = AuthService.getCurrentUser();
         return axios.post(API_URL, {
+            orderId,
             ticker,
             side,
-            quantity,
-            price
+            quantity: Number(quantity),
+            price: Number(price)
         }, {
             headers: {
                 Authorization: 'Bearer ' + user.token

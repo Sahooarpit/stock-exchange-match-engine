@@ -1,7 +1,7 @@
 import axios from 'axios';
 import AuthService from './AuthService';
 
-const API_URL = 'http://localhost:8080/api/portfolio';
+const API_URL = 'http://localhost:8080/portfolio';
 
 class PortfolioService {
     getPortfolio() {

@@ -40,8 +40,8 @@ public class Order {
 
     private Instant createdAt;
 
-    public Order(Client client, String ticker, Side side, long quantity, BigDecimal price) {
-        this.orderId = UUID.randomUUID().toString();
+    public Order(Client client, String ticker, Side side, long quantity, BigDecimal price, String orderId) {
+        this.orderId = (orderId != null && !orderId.trim().isEmpty()) ? orderId : UUID.randomUUID().toString();
         this.client = client;
         this.ticker = ticker;
         this.side = side;

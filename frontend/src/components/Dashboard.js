@@ -28,8 +28,17 @@ const Dashboard = () => {
     const handleTrade = (e) => {
         e.preventDefault();
         setMessage('');
-        TradeService.submitOrder(ticker, side, quantity, price).then(() => {
-            setMessage('Trade submitted successfully!');
+        
+        // Generate a cryptographically secure UUID to make this submission idempotent
+        const orderId = window.crypto.randomUUID();
+        
+        TradeService.submitOrder(orderId, ticker, side, quantity, price).then((response) => {
+            // Check if it was a duplicate retry that was accepted idempotently
+            if (response.data && response.data.includes("Idempotent")) {
+                setMessage('Trade already processed (Idempotent success)!');
+            } else {
+                setMessage('Trade submitted successfully!');
+            }
             fetchPortfolio(); // Refresh portfolio after trade
             setTicker('');
             setQuantity('');

@@ -7,6 +7,7 @@ import java.math.BigDecimal;
 
 @Data
 public class OrderRequest {
+    private String orderId;
     private String ticker;
     private Side side;
     private long quantity;

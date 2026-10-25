@@ -34,7 +34,7 @@ public class MatchEngine implements CommandLineRunner {
         });
 
         List<OrderStatus> openStatuses = Arrays.asList(OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED);
-        List<Order> openOrders = orderRepository.findByStatusIn(openStatuses);
+        List<Order> openOrders = orderRepository.findByStatusInOrderByCreatedAtAsc(openStatuses);
 
         for (Order order : openOrders) {
             OrderBook book = orderBooks.get(order.getTicker());
@@ -51,26 +51,31 @@ public class MatchEngine implements CommandLineRunner {
 
     @Transactional
     public List<Trade> processOrder(Order newOrder) {
-        clientService.lockFundsAndValidateOrder(newOrder);
-
         OrderBook book = orderBooks.computeIfAbsent(newOrder.getTicker(), OrderBook::new);
 
-        List<Trade> executedTrades = new ArrayList<>();
-        List<Order> modifiedBookOrders = new ArrayList<>();
+        book.getLock().lock();
+        try {
+            clientService.lockFundsAndValidateOrder(newOrder);
 
-        if (newOrder.getSide() == Side.BUY) {
-            matchBuyOrder(newOrder, book, executedTrades, modifiedBookOrders);
-        } else {
-            matchSellOrder(newOrder, book, executedTrades, modifiedBookOrders);
+            List<Trade> executedTrades = new ArrayList<>();
+            List<Order> modifiedBookOrders = new ArrayList<>();
+
+            if (newOrder.getSide() == Side.BUY) {
+                matchBuyOrder(newOrder, book, executedTrades, modifiedBookOrders);
+            } else {
+                matchSellOrder(newOrder, book, executedTrades, modifiedBookOrders);
+            }
+
+            if (newOrder.getRemainingQuantity() > 0) {
+                addOrderToBook(newOrder, book);
+            }
+
+            saveChanges(newOrder, modifiedBookOrders, executedTrades);
+
+            return executedTrades;
+        } finally {
+            book.getLock().unlock();
         }
-
-        if (newOrder.getRemainingQuantity() > 0) {
-            addOrderToBook(newOrder, book);
-        }
-
-        saveChanges(newOrder, modifiedBookOrders, executedTrades);
-
-        return executedTrades;
     }
 
     private void matchBuyOrder(Order buyOrder, OrderBook book, List<Trade> executedTrades, List<Order> modifiedBookOrders) {
@@ -157,29 +162,38 @@ public class MatchEngine implements CommandLineRunner {
         if (!order.getClient().getUsername().equals(username)) {
             throw new IllegalStateException("Not authorized to cancel this order");
         }
-        
-        if (order.getStatus() == OrderStatus.FILLED || order.getStatus() == OrderStatus.CANCELLED) {
-            throw new IllegalStateException("Order cannot be cancelled. Current status: " + order.getStatus());
-        }
 
-        // Remove from memory
         OrderBook book = orderBooks.get(order.getTicker());
         if (book != null) {
-            Map<BigDecimal, Deque<Order>> sideBook = (order.getSide() == Side.BUY) ? book.getBids() : book.getAsks();
-            Deque<Order> priceLevel = sideBook.get(order.getPrice());
-            if (priceLevel != null) {
-                priceLevel.removeIf(o -> o.getOrderId().equals(orderId));
-                if (priceLevel.isEmpty()) {
-                    sideBook.remove(order.getPrice());
+            book.getLock().lock();
+        }
+        try {
+            if (order.getStatus() == OrderStatus.FILLED || order.getStatus() == OrderStatus.CANCELLED) {
+                throw new IllegalStateException("Order cannot be cancelled. Current status: " + order.getStatus());
+            }
+
+            // Remove from memory
+            if (book != null) {
+                Map<BigDecimal, Deque<Order>> sideBook = (order.getSide() == Side.BUY) ? book.getBids() : book.getAsks();
+                Deque<Order> priceLevel = sideBook.get(order.getPrice());
+                if (priceLevel != null) {
+                    priceLevel.removeIf(o -> o.getOrderId().equals(orderId));
+                    if (priceLevel.isEmpty()) {
+                        sideBook.remove(order.getPrice());
+                    }
                 }
             }
-        }
 
-        // Unlock funds
-        clientService.unlockFunds(order);
-        
-        // Update DB
-        order.setStatus(OrderStatus.CANCELLED);
-        orderRepository.save(order);
+            // Unlock funds
+            clientService.unlockFunds(order);
+            
+            // Update DB
+            order.setStatus(OrderStatus.CANCELLED);
+            orderRepository.save(order);
+        } finally {
+            if (book != null) {
+                book.getLock().unlock();
+            }
+        }
     }
 }

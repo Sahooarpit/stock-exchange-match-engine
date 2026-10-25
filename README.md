@@ -17,7 +17,7 @@ This project was designed to be a comprehensive, real-world example of a modern 
 
 ### Back-End Architecture
 
-The back-end is built with Spring Boot and features a real-time, in-memory **Order Matching Engine**. The core of the engine uses a **price-time priority** algorithm to ensure fairness in trade execution. To handle high-performance and thread-safe operations under concurrent load, I utilized advanced Java data structures, including a `ConcurrentHashMap` to manage the order books for different tickers and a `Deque` for the order queues at each price level.
+The back-end is built with Spring Boot and features a real-time, in-memory **Order Matching Engine**. The core of the engine uses a **price-time priority** algorithm to ensure fairness in trade execution. To handle high-performance and thread-safe operations under concurrent load, I utilized a hybrid concurrency model: a `ConcurrentHashMap` to manage the order books across tickers, combined with a dedicated per-instrument `ReentrantLock` inside each `OrderBook`. This ensures that orders for different tickers process concurrently in parallel across threads, while orders within the same ticker are serialized to maintain strict FIFO price-time priority and prevent race conditions.
 
 Data integrity is paramount in a financial application. To guarantee this, all critical database operations (such as updating user balances and stock holdings after a trade) are wrapped in a single service method and annotated with `@Transactional`. This ensures **ACID properties**, meaning a trade and its corresponding portfolio updates succeed or fail as a single, atomic unit, preventing data corruption.
 
@@ -136,8 +136,8 @@ The entire application stack is containerized using **Docker and Docker Compose*
   - **Solution:** I implemented a robust **Escrow/Locking system** where funds are deducted from a user's `Available` balance and moved to a `Locked` balance the moment an order is created. When the order executes or is cancelled, the locked funds are consumed or refunded accordingly. Additionally, I implemented **Idempotency keys** by generating a unique UUID on the React frontend for each trade request. The backend uses this UUID as the primary key for the order, rejecting duplicate submissions with the same key to prevent accidental double-ordering.
 
 - **Challenge: Concurrency in the Matching Engine.**
-  - **Problem:** The engine needed to handle simultaneous orders without causing race conditions.
-  - **Solution:** I chose `ConcurrentHashMap` and `Deque` to create a thread-safe order book structure, allowing for high-throughput, non-blocking reads and safe, concurrent writes.
+  - **Problem:** The engine needed to handle simultaneous orders across multi-threaded HTTP requests without race conditions (such as double-filling an order or causing a `ConcurrentModificationException` on the internal `TreeMap` and `Deque` data structures). While `ConcurrentHashMap` guarantees thread-safe order book lookup by ticker, it does not synchronize operations on the in-memory collections within each book.
+  - **Solution:** I implemented a granular, per-instrument concurrency model using `ReentrantLock`. While `ConcurrentHashMap` enables concurrent, non-blocking lookups across different instruments (e.g., `AAPL` and `BTC` execute in parallel on separate threads), each `OrderBook` holds its own `ReentrantLock`. This serializes order matching and cancellations per ticker, strictly preserving FIFO price-time priority, preventing double-fill race conditions, and delivering thread safety without creating a global application-wide bottleneck.
 
 - **Challenge: Stateless Authentication in a Decoupled System.**
   - **Problem:** Managing user sessions securely between a separate front-end and back-end without traditional sessions.

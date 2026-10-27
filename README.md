@@ -54,7 +54,7 @@ graph TD
         end
 
         subgraph "Security"
-            SEC1[JwtRequestFilter]
+            SEC1[OAuth2 Resource Server]
             SEC2[JwtUtil]
             SEC3[SecurityConfig]
         end
@@ -98,8 +98,7 @@ graph TD
     R4 -- Interacts with --> DB
     R5 -- Interacts with --> DB
 
-    SEC1 -- Uses --> SEC2
-    SEC1 -- Uses --> S5
+    SEC1 -- Uses --> SEC3
     C1 -- Uses --> SEC2
 ```
 
@@ -115,7 +114,7 @@ This separation makes the codebase cleaner, more organized, and significantly ea
 
 ### Security
 
-Security is implemented from the ground up using Spring Security with a stateless **JSON Web Token (JWT)** authentication flow. When a user logs in, the back-end generates a signed JWT. This token is then required in the `Authorization` header for all protected API endpoints. A custom `JwtRequestFilter` intercepts each request to validate the token, ensuring that every API call is authenticated without relying on server-side sessions. This stateless approach is crucial for scalability and building microservices-ready applications.
+Security is implemented using Spring Security's native **OAuth2 Resource Server** (`spring-boot-starter-oauth2-resource-server`) with stateless **JSON Web Token (JWT)** validation. When a user logs in, the back-end issues a digitally signed JWT containing the user identity and assigned roles. For all protected endpoints, Spring Security's built-in `BearerTokenAuthenticationFilter` intercepts the request, uses a configured `NimbusJwtDecoder` to verify token integrity and expiration, and extracts user authorities via a custom `JwtAuthenticationConverter`. This standard-compliant architecture removes custom boilerplate filter code, handles error challenges gracefully according to RFC 6750, and allows seamless future integration with external Identity Providers (Keycloak, Auth0, etc.).
 
 ### Front-End Architecture
 

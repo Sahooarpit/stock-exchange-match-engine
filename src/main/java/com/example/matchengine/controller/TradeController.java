@@ -11,7 +11,6 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -30,7 +29,7 @@ public class TradeController {
 
     @PostMapping("/trade")
     public ResponseEntity<String> submitOrder(@Valid @RequestBody OrderRequest orderRequest) {
-        String username = ((User) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getUsername();
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
 
         // 1. Check for Idempotency
         if (orderRequest.getOrderId() != null && !orderRequest.getOrderId().trim().isEmpty()) {
@@ -64,7 +63,7 @@ public class TradeController {
     
     @PostMapping("/trade/cancel")
     public ResponseEntity<String> cancelOrder(@RequestParam String orderId) {
-        String username = ((User) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getUsername();
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
         matchEngine.cancelOrder(orderId, username);
         return ResponseEntity.ok("Order cancelled successfully");
     }

@@ -7,7 +7,6 @@ import com.example.matchengine.repository.TradeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -24,7 +23,7 @@ public class TransactionController {
 
     @GetMapping
     public ResponseEntity<List<Trade>> getTransactions() {
-        String username = ((User) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getUsername();
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
         Client client = clientRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("Client not found for username: " + username));
         List<Trade> trades = tradeRepository.findByBuyClientOrSellClient(client, client);

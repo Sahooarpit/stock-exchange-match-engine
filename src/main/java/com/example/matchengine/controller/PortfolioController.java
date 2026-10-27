@@ -8,7 +8,6 @@ import com.example.matchengine.service.PortfolioService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.core.userdetails.User;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -25,7 +24,7 @@ public class PortfolioController {
 
     @GetMapping
     public ResponseEntity<List<PortfolioHolding>> getPortfolio() {
-        String username = ((User) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getUsername();
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
         Client client = clientService.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("Client not found for username: " + username));
         List<PortfolioHolding> holdings = portfolioService.getPortfolio(client.getClientId());
@@ -34,7 +33,7 @@ public class PortfolioController {
 
     @GetMapping("/orders")
     public ResponseEntity<List<Order>> getPendingOrders() {
-        String username = ((User) SecurityContextHolder.getContext().getAuthentication().getPrincipal()).getUsername();
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
         Client client = clientService.findByUsername(username)
                 .orElseThrow(() -> new IllegalStateException("Client not found for username: " + username));
         List<Order> pendingOrders = portfolioService.getPendingOrders(client.getClientId());
